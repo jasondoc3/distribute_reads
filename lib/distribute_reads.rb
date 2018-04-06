@@ -60,7 +60,15 @@ module DistributeReads
         # makara doesn't send SHOW queries to replica, so we must force it
         Thread.current[:distribute_reads][:replica] = true
         status = connection.exec_query("SHOW SLAVE STATUS").to_hash.first
-        status ? status["Seconds_Behind_Master"].to_f : 0.0
+        return status["Seconds_Behind_Master"].to_f if status
+
+        # If the above returns the empty set, check if using AWS Aurora
+        # Aurora MySQL does not use MySQL Binary Log File Position Based Replication method for its replication,
+        # which is why the SHOW SLAVE STATUS command does not show any information.
+        has_aurora_table = connection.exec_query("SHOW TABLES FROM mysql LIKE 'ro_replica_status'").to_hash.first
+        return 0.0 unless has_aurora_table
+        status = connection.exec_query("SELECT Replica_lag_in_msec FROM mysql.ro_replica_status").to_hash.first
+        status ? status["Replica_lag_in_msec"] : 0.0
       ensure
         Thread.current[:distribute_reads][:replica] = replica_value
       end
